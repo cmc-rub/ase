@@ -1,4 +1,3 @@
-# type: ignore
 """
 This module defines an ASE interface to Turbomole: http://www.turbomole.com/
 
@@ -19,6 +18,7 @@ from ase.units import Ha, Bohr
 from ase.io import read, write
 from ase.calculators.calculator import FileIOCalculator
 from ase.calculators.calculator import PropertyNotImplementedError, ReadError
+from ase.utils import basestring
 
 
 def read_output(regex):
@@ -29,8 +29,8 @@ def read_output(regex):
         if filename.startswith('job.') or filename.endswith('.out'):
             checkfiles.append(filename)
     for filename in checkfiles:
-        with open(filename, 'rt') as fd:
-            lines = fd.readlines()
+        with open(filename, 'rt') as f:
+            lines = f.readlines()
             for line in lines:
                 match = re.search(regex, line)
                 if match:
@@ -42,7 +42,7 @@ def execute(args, input_str=None, error_test=True,
             stdout_tofile=True):
     """executes a turbomole executable and process the outputs"""
 
-    if isinstance(args, str):
+    if isinstance(args, basestring):
         args = args.split()
 
     if stdout_tofile:
@@ -86,13 +86,13 @@ def add_data_group(data_group, string=None, raw=False):
         if string:
             data += ' ' + string
         data += '\n'
-    fd = open('control', 'r+')
-    lines = fd.readlines()
-    fd.seek(0)
-    fd.truncate()
+    f = open('control', 'r+')
+    lines = f.readlines()
+    f.seek(0)
+    f.truncate()
     lines.insert(2, data)
-    fd.write(''.join(lines))
-    fd.close()
+    f.write(''.join(lines))
+    f.close()
 
 
 def read_data_group(data_group):
@@ -209,7 +209,7 @@ class Turbomole(FileIOCalculator):
             'default': 'def-SV(P)',
             'group': 'basis',
             'key': None,
-            'type': str,
+            'type': None,
             'units': None,
             'updateable': False
         },
@@ -257,6 +257,24 @@ class Turbomole(FileIOCalculator):
             'type': str,
             'units': None,
             'updateable': True
+        },
+        'dispersion correction': {
+            'comment': None,
+            'default': None,
+            'group': 'dsp',
+            'key': 'dsp',
+            'type': str,
+            'units': None,
+            'updateable': True
+        },
+        'ecp name': {
+            'comment': None,
+            'default': None,
+            'group': 'basis',
+            'key': None,
+            'type': None,
+            'units': None,
+            'updateable': False
         },
         'energy convergence': {
             'comment': 'jobex -energy <int>',
@@ -381,6 +399,15 @@ class Turbomole(FileIOCalculator):
             'type': None,
             'units': None,
             'updateable': False
+        },
+        'memory': {
+            'comment': None,
+            'default': 500,
+            'group': 'maxcor',
+            'key': 'maxcor',
+            'type': int,
+            'units': 'Megabyte',
+            'updateable': True
         },
         'minimal damping': {
             'comment': None,
@@ -588,7 +615,7 @@ class Turbomole(FileIOCalculator):
     def __init__(self, label=None, calculate_energy='dscf',
                  calculate_forces='grad', post_HF=False, atoms=None,
                  restart=False, define_str=None, control_kdg=None,
-                 control_input=None, reset_tolerance=1e-2, **kwargs):
+                 control_input=None, **kwargs):
 
         FileIOCalculator.__init__(self)
 
@@ -600,7 +627,6 @@ class Turbomole(FileIOCalculator):
         self.define_str = define_str
         self.control_kdg = control_kdg
         self.control_input = control_input
-        self.reset_tolerance = reset_tolerance
 
         # construct flat dictionaries with parameter attributes
         for p in self.parameter_spec:
@@ -617,7 +643,7 @@ class Turbomole(FileIOCalculator):
             self.reset()
 
         if atoms is not None:
-            atoms.calc = self
+            atoms.set_calculator(self)
             self.set_atoms(atoms)
 
     def __getitem__(self, item):
@@ -763,7 +789,7 @@ class Turbomole(FileIOCalculator):
 
         # kwargs parameters are ignored if user provides define_str
         if self.define_str is not None:
-            assert isinstance(self.define_str, str)
+            assert isinstance(self.define_str, basestring)
             assert len(self.define_str) != 0
             return
 
@@ -807,7 +833,7 @@ class Turbomole(FileIOCalculator):
     def set_atoms(self, atoms):
         """Create the self.atoms object and writes the coord file. If
         self.atoms exists a check for changes and an update of the atoms
-        is performed. Note: Only positions changes are tracked in this
+        are performed. Note: Only positions changes are tracked in this
         version.
         """
         changes = self.check_state(atoms, tol=1e-13)
@@ -821,14 +847,14 @@ class Turbomole(FileIOCalculator):
             else:
                 return
 
-        changes = self.check_state(atoms, tol=self.reset_tolerance)
+        changes = self.check_state(atoms, tol=1e-2)
         if 'positions' in changes:
-            # print(two atoms obj are different')
-            self.reset()
+            print('two atoms obj are different')
+            #self.reset()
         else:
-            # print('two atoms obj are slightly different')
-            if self.parameters['use redundant internals']:
-                self.reset()
+            print('two atoms obj are slightly different')
+            #if self.parameters['use redundant internals']:
+            #    self.reset()
 
         write('coord', atoms)
         self.atoms = atoms.copy()
@@ -841,8 +867,8 @@ class Turbomole(FileIOCalculator):
         """construct a define string from the parameters dictionary"""
         define_str_tpl = (
             '\n__title__\na coord\n__inter__\n'
-            'bb all __basis_set__\n*\neht\ny\n__charge_str____occ_str__'
-            '__single_atom_str____norb_str____dft_str____ri_str__'
+            '__basis_str__\neht\ny\n__charge_str____occ_str__'
+            '__single_atom_str____norb_str____dft_str____ri_str____mem_str____dsp_str__'
             '__scfiterlimit____fermi_str____damp_str__q\n'
         )
 
@@ -853,6 +879,18 @@ class Turbomole(FileIOCalculator):
         else:
             internals_str = '*\nno'
         charge_str = str(params['total charge']) + '\n'
+
+        if type(params['basis set name']) == str:
+            basis_str = 'bb all ' + params['basis set name'] + '\n'
+        else:
+            basis_str =  ''.join(['bb "{}" {}\n'.format(k,v) for k, v in params['basis set name'].items()])
+        if params['ecp name']:
+            if type(params['basis set name']) == str:
+                basis_str += 'ecp all ' + params['ecp name'] + '\n*\n'
+            else:
+                basis_str +=  ''.join(['ecp "{}" {}\n'.format(k,v) for k, v in params['ecp name'].items()]) + '*\n'
+        else:
+            basis_str += '*\n'
 
         if params['multiplicity'] == 1:
             if params['uhf']:
@@ -875,7 +913,7 @@ class Turbomole(FileIOCalculator):
         else:
             single_atom_str = '\n'
 
-        if params['multiplicity'] == 1 and not params['uhf']:
+        if params['multiplicity'] == 1:
             norb_str = ''
         else:
             norb_str = 'n\n'
@@ -895,6 +933,16 @@ class Turbomole(FileIOCalculator):
             ri_str = 'ri\non\nm ' + str(params['ri memory']) + '\n*\n'
         else:
             ri_str = ''
+
+        if params['memory']:
+            mem_str = 'mp2\nmemory\n' + str(params['memory']) + '\n*\n'
+        else:
+            mem_str = ''
+
+        if params['dispersion correction']:
+            dsp_str = 'dsp\n' + params['dispersion correction'] + '\n*\n'
+        else:
+            dsp_str = ''
 
         if params['scf iterations']:
             scfmaxiter = params['scf iterations']
@@ -938,13 +986,14 @@ class Turbomole(FileIOCalculator):
 
         define_str = define_str_tpl
         define_str = re.sub('__title__', params['title'], define_str)
-        define_str = re.sub('__basis_set__', params['basis set name'],
-                            define_str)
+        define_str = re.sub('__basis_str__', basis_str, define_str)
         define_str = re.sub('__charge_str__', charge_str, define_str)
         define_str = re.sub('__occ_str__', occ_str, define_str)
         define_str = re.sub('__norb_str__', norb_str, define_str)
         define_str = re.sub('__dft_str__', dft_str, define_str)
         define_str = re.sub('__ri_str__', ri_str, define_str)
+        define_str = re.sub('__mem_str__', mem_str, define_str)
+        define_str = re.sub('__dsp_str__', dsp_str, define_str)
         define_str = re.sub('__single_atom_str__', single_atom_str,
                             define_str)
         define_str = re.sub('__inter__', internals_str, define_str)
@@ -1106,7 +1155,7 @@ class Turbomole(FileIOCalculator):
     def read_restart(self):
         """read a previous calculation from control file"""
         self.atoms = read('coord')
-        self.atoms.calc = self
+        self.atoms.set_calculator(self)
         self.converged = self.read_convergence()
         read_methods = [
             self.read_energy,
@@ -1189,7 +1238,7 @@ class Turbomole(FileIOCalculator):
                 else:
                     if pdgs[p] is None:
                         params[p] = None
-                    elif isinstance(pdgs[p], str):
+                    elif isinstance(pdgs[p], basestring):
                         if self.parameter_type[p] is bool:
                             params[p] = (pdgs[p] == self.parameter_key[p])
                     else:
@@ -1706,12 +1755,8 @@ class Turbomole(FileIOCalculator):
                 x = float(match.group(1)) * Bohr
                 y = float(match.group(3)) * Bohr
                 z = float(match.group(5)) * Bohr
-                symbol = str(match.group(7)).capitalize()
-
-                if symbol == 'Q':
-                    symbol = 'X'
-                atoms += Atom(symbol, (x, y, z))
-
+                symbol = str(match.group(7))
+                atoms += Atom(symbol.capitalize(), (x, y, z))
                 continue
             # gradient lines
             regex = (
@@ -1979,7 +2024,8 @@ class Turbomole(FileIOCalculator):
         return self.forces.copy()
 
     def get_dipole_moment(self, atoms):
-        self.get_potential_energy(atoms)
+        if self.update_energy:
+            self.get_potential_energy(atoms)
         self.read_dipole_moment()
         return self.dipole
 
@@ -2031,8 +2077,9 @@ class Turbomole(FileIOCalculator):
 
     def get_charges(self, atoms):
         """return partial charges on atoms from an ESP fit"""
-        self.get_potential_energy(atoms)
-        self.read_charges()
+        if self.charges is None:
+            self.calculate(atoms)
+            self.read_charges()
         return self.charges
 
     def read_charges(self):
